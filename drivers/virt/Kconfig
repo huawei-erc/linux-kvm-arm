@@ -30,4 +30,11 @@ config FSL_HV_MANAGER
           4) A kernel interface for receiving callbacks when a managed
 	     partition shuts down.
 
+config VCPU_HOTPLUG
+	bool "VCPU Hotplug driver"
+	help
+	  The VCPU Hotplug driver enables hot-add and hot-removal of VCPUs
+	  in the guest, triggered by the host.
+	  Currently, this is implemented only for the VExpress ARM board.
+
 endif
