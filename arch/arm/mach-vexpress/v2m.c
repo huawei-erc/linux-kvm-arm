@@ -47,6 +47,11 @@
 #define V2M_PA_CS3	0x4c000000
 #define V2M_PA_CS7	0x10000000
 
+#ifdef CONFIG_VCPU_HOTPLUG
+#define VEXPRESS_VCPU_HOTPLUG_BASE 0x12000000
+#define VEXPRESS_VCPU_HOTPLUG_IRQ 95
+#endif /* CONFIG_VCPU_HOTPLUG */
+
 static struct map_desc v2m_io_desc[] __initdata = {
 	{
 		.virtual	= V2M_PERIPH,
@@ -203,6 +208,30 @@ static struct platform_device v2m_cf_device = {
 	.num_resources	= ARRAY_SIZE(v2m_pata_resources),
 	.dev.platform_data = &v2m_pata_data,
 };
+
+#ifdef CONFIG_VCPU_HOTPLUG
+static struct resource v2m_vcpu_hp_resources[] = {
+	{
+		.start = VEXPRESS_VCPU_HOTPLUG_BASE,
+		.end   = (VEXPRESS_VCPU_HOTPLUG_BASE + SZ_4K - 1),
+		.flags = IORESOURCE_MEM,
+	}, {
+		.start	= VEXPRESS_VCPU_HOTPLUG_IRQ,
+		.end 	= VEXPRESS_VCPU_HOTPLUG_IRQ,
+		.flags  = IORESOURCE_IRQ,
+	},
+};
+
+static struct platform_device v2m_vcpu_hp_device = {
+	.name = "vcpu_hotplug_device",
+	.id = 0,
+	.dev = {
+		.platform_data = NULL,
+	},
+	.num_resources = ARRAY_SIZE(v2m_vcpu_hp_resources),
+	.resource = v2m_vcpu_hp_resources,
+};
+#endif /* CONFIG_VCPU_HOTPLUG */
 
 static struct mmci_platform_data v2m_mmci_data = {
 	.ocr_mask	= MMC_VDD_32_33|MMC_VDD_33_34,
@@ -481,6 +510,11 @@ static const struct of_device_id v2m_dt_bus_match[] __initconst = {
 
 static void __init v2m_dt_init(void)
 {
+#ifdef CONFIG_VCPU_HOTPLUG
+	printk(KERN_NOTICE "registering vcpu hotplug platform device\n");
+	platform_device_register(&v2m_vcpu_hp_device);
+#endif /* CONFIG_VCPU_HOTPLUG */
+
 	l2x0_of_init(0x00400000, 0xfe0fffff);
 	of_platform_populate(NULL, v2m_dt_bus_match, NULL, NULL);
 	pm_power_off = vexpress_power_off;
