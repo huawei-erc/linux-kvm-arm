@@ -78,6 +78,22 @@
 			     <0 69 4>;
 	};
 
+
+	dcc {
+		compatible = "arm,vexpress,config-bus";
+		arm,vexpress,config-bridge = <&v2m_sysreg>;
+
+		smbclk: osc@6 {
+			/* Static memory controller clock */
+			compatible = "arm,vexpress-osc";
+			arm,vexpress-sysreg,func = <1 6>;
+			freq-range = <20000000 40000000>;
+			#clock-cells = <0>;
+			clock-output-names = "oscclk6";
+		};
+	};
+
+
 	motherboard {
 		ranges = <0 0 0 0x08000000 0x04000000>,
 			 <1 0 0 0x14000000 0x04000000>,
