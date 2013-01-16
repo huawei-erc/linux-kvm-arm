@@ -30,10 +30,10 @@
 #include <linux/cpumask.h>
 #include <linux/cpu.h>
 #include <linux/interrupt.h>
-
 #include "vcpu_hotplug_dev.h"
+#include "cpumask_thread.h"
 
-static struct vcpu_hotplug_dev *vcpu_hotplug_device;
+struct vcpu_hotplug_dev *vcpu_hotplug_device;
 static dev_t dev;
 
 /*******************************************************
@@ -101,19 +101,33 @@ __cpuinit int test_cpumask(void)
 }
 
 /********************************************************************
+* TESTING fileops write()
+*********************************************************************/
+__cpuinit ssize_t vcpu_hotplug_device_write_test(struct file * filp,
+			const char __user * buf, size_t count, loff_t * f_pos)
+{
+
+	/* start cpumask thread */
+	cpumask_flag = 1;
+	wake_up_interruptible(&kthread_wq);
+	return count;
+}
+
+/********************************************************************
 * fileops write()
 *********************************************************************/
 __cpuinit ssize_t vcpu_hotplug_device_write(struct file * filp,
 			const char __user * buf, size_t count, loff_t * f_pos)
 {
-	struct vcpu_hotplug_dev *dev = filp->private_data;
+	//struct vcpu_hotplug_dev *dev = filp->private_data;
 	char *buffer;
 	int retval = 0;
 
+	/*
 	if (down_interruptible(&dev->sem)) {
 		printk(KERN_WARNING "semaphore error\n");
 		return -ERESTARTSYS;
-	}
+	}*/
 
 	/* allocate one page size buffer */
 	buffer = kmalloc(PAGE_SIZE, GFP_KERNEL);
@@ -138,7 +152,7 @@ __cpuinit ssize_t vcpu_hotplug_device_write(struct file * filp,
 	test_cpumask();
 
 	kfree(buffer);
-	up(&dev->sem);
+	//up(&dev->sem);
 	printk(KERN_WARNING "leaving fileops write\n");
 	return retval;
 }
@@ -152,10 +166,11 @@ ssize_t vcpu_hotplug_device_read(struct file * filp, char __user * buf,
 	struct vcpu_hotplug_dev *dev = filp->private_data;
 	int value;
 	void __iomem *io_address = __io_address(VCPU_HOTPLUG_DEVICE_BASE);
-
-	/* Request unique access */
+	/*
+	// Request unique access
 	if (down_interruptible(&dev->sem))
 		return -ERESTARTSYS;
+	*/
 
 	printk(KERN_NOTICE
 		"phy_base_addr: %x, virt_base_addr(io_address): %p virt_base_addr_ioremap %p\n",
@@ -166,7 +181,7 @@ ssize_t vcpu_hotplug_device_read(struct file * filp, char __user * buf,
 	value = ioread32(dev->virt_base_addr + 0x4);
 	printk(KERN_WARNING "device s->level value %x", value);
 
-	up(&dev->sem);
+	//up(&dev->sem);
 	return 0;
 }
 
@@ -194,7 +209,7 @@ int vcpu_hotplug_device_release(struct inode *inode, struct file *filp)
 __refdata struct file_operations vcpu_hotplug_device_fops = {
 	.owner = NULL,
 	.read = vcpu_hotplug_device_read,
-	.write = vcpu_hotplug_device_write,
+	.write = vcpu_hotplug_device_write_test,
 	.open = vcpu_hotplug_device_open,
 	.release = vcpu_hotplug_device_release,
 };
@@ -231,11 +246,18 @@ static int __devexit vcpu_hotplug_device_remove(struct platform_device *pdev)
 static irqreturn_t handle_vcpu_irq(int irq, void *opaque)
 {
 	irqreturn_t ret = IRQ_NONE;
+	unsigned long value;
 	static int i = 0;
-	//NOTE: remove this, not safe
 	printk(KERN_ALERT "Entered to IRQ handler %d\n", i++);
+	/*read control byte */
+	value = ioread8(vcpu_hotplug_device->virt_base_addr + VCPU_HP_HEADER_CTRL);
+	/*disable IRQ */
+	clear_bit(0,&value);
+	iowrite8(&value, vcpu_hotplug_device->virt_base_addr + VCPU_HP_HEADER_CTRL);
+	/* start cpumask thread */
+	cpumask_flag = 1;
+	wake_up_interruptible(&kthread_wq);
 	ret = IRQ_HANDLED;
-
 	return ret;
 }
 
@@ -244,6 +266,7 @@ static irqreturn_t handle_vcpu_irq(int irq, void *opaque)
  *******************************************************/
 static int __devinit vcpu_hotplug_device_probe(struct platform_device *pdev)
 {
+
 	/* start of setting up file operations */
 	/* allocate device number */
 	int res = alloc_chrdev_region(&dev, VCPU_HOTPLUG_DEVICE_MINOR_START,
@@ -270,7 +293,7 @@ static int __devinit vcpu_hotplug_device_probe(struct platform_device *pdev)
 
 	/* Fill the vcpu_hotplug_device region with zeros */
 	memset(vcpu_hotplug_device, 0, sizeof(struct vcpu_hotplug_dev));
-	sema_init(&vcpu_hotplug_device->sem, 1);
+	//sema_init(&vcpu_hotplug_device->sem, 1);
 	cdev_init(&vcpu_hotplug_device->cdev, &vcpu_hotplug_device_fops);
 	vcpu_hotplug_device->cdev.owner = NULL;
 	vcpu_hotplug_device->cdev.ops = &vcpu_hotplug_device_fops;
@@ -322,6 +345,8 @@ static int __devinit vcpu_hotplug_device_probe(struct platform_device *pdev)
 			vcpu_hotplug_device->irq);
 		return -EIO;
 	}
+	/*create kernel thread */
+	kthread_run(cpumask_thread, vcpu_hotplug_device, "cpumask_thread");
 
 	return 0;
 
