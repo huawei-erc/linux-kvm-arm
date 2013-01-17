@@ -33,8 +33,8 @@
 #include "vcpu_hotplug_dev.h"
 #include "cpumask_thread.h"
 
-struct vcpu_hotplug_dev *vcpu_hotplug_device;
-struct resource *mem_region;
+static struct vcpu_hotplug_dev *vcpu_hotplug_device;
+static struct resource *mem_region;
 static dev_t dev;
 
 /*******************************************************
