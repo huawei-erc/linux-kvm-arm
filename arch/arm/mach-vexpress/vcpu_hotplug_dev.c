@@ -253,7 +253,7 @@ static irqreturn_t handle_vcpu_irq(int irq, void *opaque)
 	value = ioread8(vcpu_hotplug_device->virt_base_addr + VCPU_HP_HEADER_CTRL);
 	/*disable IRQ */
 	clear_bit(0,&value);
-	iowrite8(&value, vcpu_hotplug_device->virt_base_addr + VCPU_HP_HEADER_CTRL);
+	iowrite8(value, vcpu_hotplug_device->virt_base_addr + VCPU_HP_HEADER_CTRL);
 	/* start cpumask thread */
 	cpumask_flag = 1;
 	wake_up_interruptible(&kthread_wq);
