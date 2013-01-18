@@ -61,6 +61,7 @@ int modify_cpumask(struct vcpu_hotplug_dev *vcpu_hp_dev) {
 	unsigned int request = 0;
 	unsigned int online = 0;
 	unsigned int i = 0;
+	//unsigned int k = 0;
 	unsigned int max_iter = 0;
 
 	
@@ -100,12 +101,14 @@ int modify_cpumask(struct vcpu_hotplug_dev *vcpu_hp_dev) {
 	cpumask_copy(online_mask,cpu_online_mask);
 	online_cpumask_bits = (unsigned int *)cpumask_bits(online_mask);
 	printk(KERN_NOTICE "cpumask online bits %u\n", *online_cpumask_bits);
-	for(i = 0; i < max_iter; i++) {
+	for(i = max_iter - 1; i > 0; i--) {
 		bytes[i] = (*online_cpumask_bits >> (i * 8)) & 0xFF;
-  		printk(KERN_NOTICE "bytes %d %u", i, bytes[i]);
+  		//printk(KERN_NOTICE "bytes %d %x", i, (unsigned char)bytes[i]);
+		iowrite8(bytes[i], vcpu_hp_dev->virt_base_addr + VCPU_HP_HEADER_N + req_cpumask_sz + i);
 	}
 	bytes[i] = *online_cpumask_bits & 0xFF;
-	printk(KERN_NOTICE "bytes %d %x", i, (unsigned char)bytes[i]);
+	iowrite8(bytes[i], vcpu_hp_dev->virt_base_addr + VCPU_HP_HEADER_N + req_cpumask_sz + i);
+	//printk(KERN_NOTICE "bytes %d %x", i, (unsigned char)bytes[i]);
 	
 
 	kfree(req_cpumask);
