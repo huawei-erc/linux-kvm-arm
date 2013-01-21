@@ -1,22 +1,21 @@
-#define VCPU_HOTPLUG_DEVICE_MINOR_START 0
-#define VCPU_HOTPLUG_DEVICE_COUNT 1
-#define VCPU_HOTPLUG_DEVICE_NAME "vcpu_hotplug_dev"
-#define VCPU_HOTPLUG_DEVICE_BASE 0x12000000
+#define VCPU_HOTPLUG_DEV_MINOR_START 0
+#define VCPU_HOTPLUG_DEV_COUNT 1
+#define VCPU_HOTPLUG_DEV_NAME "vcpu_hotplug_dev"
+#define VCPU_HOTPLUG_DEV_BASE 0x12000000
 
 struct vcpu_hotplug_dev {
 	struct resource *phy_base_addr;
+	struct resource *io_region;
 	void __iomem *virt_base_addr;
+
+	dev_t devid;
+	struct cdev cdev;
+
 	unsigned int irq;
 	char *buffer;
 	unsigned long size;
-	//struct semaphore sem;
-	struct cdev cdev;
+	/* struct semaphore sem; */
 };
-
-
-
-#define VCPU_HP_MAX_CPUS 256
-#define VCPU_HP_MASK_SIZE (VCPU_HP_MAX_CPUS / BITS_PER_BYTE)
 
 /* VCPU HP header bytes offsets */
 enum vcpu_hp_header {
@@ -66,7 +65,3 @@ static void vcpu_hp_clear_creg(unsigned char *ctrl, enum vcpu_hp_ctrl reg)
 {
     *ctrl &= ~(1 << reg);
 }
-
-
-
-

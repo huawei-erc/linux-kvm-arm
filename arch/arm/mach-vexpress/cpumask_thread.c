@@ -11,145 +11,118 @@
 int cpumask_flag = 0;
 DECLARE_WAIT_QUEUE_HEAD(kthread_wq);
 
-unsigned int read_req_cpumask_sz(struct vcpu_hotplug_dev *vcpu_hp_dev) {
-	unsigned int req_mask;
-	req_mask = ioread8(vcpu_hp_dev->virt_base_addr + VCPU_HP_HEADER_MASK_SZ);
-	return req_mask;
+#define MASK_SZ_MAX 0xff
+
+static unsigned int read_mask_sz(struct vcpu_hotplug_dev *vcpu_hp_dev)
+{
+	return ioread8(vcpu_hp_dev->virt_base_addr + VCPU_HP_HEADER_MASK_SZ);
 }
 
-char* read_req_cpumask(struct vcpu_hotplug_dev *vcpu_hp_dev) {
-	int req_cpumask_sz;
-	char *buffer;
-	int i = 0;
-	req_cpumask_sz = read_req_cpumask_sz(vcpu_hp_dev);
-	buffer =
-		kmalloc(req_cpumask_sz + 1, GFP_KERNEL);
-	if (buffer == NULL) {
-		return NULL;
-	}
-	while(i < req_cpumask_sz) {
-		buffer[i] = ioread8(vcpu_hp_dev->virt_base_addr + VCPU_HP_HEADER_N + i);
-		i++;
-	}
-	buffer[i] = '\0'; 
-	return buffer;
+static void read_req_mask(struct vcpu_hotplug_dev *vcpu_hp_dev,
+			unsigned char *mask, unsigned int mask_sz)
+{
+	unsigned int i;
+	for (i = 0; i < mask_sz; i++)
+		mask[i] = ioread8(vcpu_hp_dev->virt_base_addr
+				+ VCPU_HP_HEADER_N + i);
+	mask[mask_sz] = 0xAA; /* end with something noticeable for testing. */
 }
 
-int print_requested_cpumask(char *print_buf) {
-	int i = 0;
-	printk(KERN_NOTICE "requested cpumask: ");
-	while(print_buf[i] != '\0')  {	
-		printk(KERN_NOTICE "%02X", (int)print_buf[i]);
-		i++;
+static void write_resp_mask(struct vcpu_hotplug_dev *vcpu_hp_dev,
+			unsigned char *mask, unsigned int mask_sz)
+{
+	unsigned int i; unsigned long ctrl;
+
+	for (i = 0; i < mask_sz; i++) {
+		iowrite8(mask[i], vcpu_hp_dev->virt_base_addr
+			+ VCPU_HP_HEADER_N + mask_sz + i);
 	}
-	printk(KERN_NOTICE "\n");
-	return 0;
+
+	/* read control byte */
+	ctrl = ioread8(vcpu_hp_dev->virt_base_addr + VCPU_HP_HEADER_CTRL);
+	/* clear HPR */
+	clear_bit(VCPU_HP_CTRL_HPR, &ctrl);
+	/* rewrite ctrl byte */
+	iowrite8(ctrl, vcpu_hp_dev->virt_base_addr + VCPU_HP_HEADER_CTRL);
 }
 
+static void print_mask(unsigned char *mask, unsigned int n)
+{
+	printk(KERN_NOTICE "vcpu mask: %*phC\n", n, mask);
+}
 
-int modify_cpumask(struct vcpu_hotplug_dev *vcpu_hp_dev) {
-	char *req_cpumask;
-	unsigned int req_cpumask_sz;
-	struct cpumask *online_mask = NULL;
-	struct cpumask *possible_mask = NULL;
-	unsigned char *bytes = NULL;
-	unsigned int *online_cpumask_bits;
-	unsigned int *possible_cpumask_bits;
-	unsigned int req_mask = 0;
-	unsigned int byte_mask = 0;
-	unsigned int byte_counter = 0;
-	unsigned int request = 0;
-	unsigned int online = 0;
-	unsigned int i = 0;
-	//unsigned int k = 0;
-	unsigned int max_iter = 0;
+__cpuinit void modify_cpumask(struct vcpu_hotplug_dev *vcpu_hp_dev)
+{
+	unsigned char vcpu_mask[MASK_SZ_MAX + 1] = { 0 };
+	unsigned int vcpu_mask_sz, i;
+	unsigned int vcpu_mask_bits;
 
-	
-	req_cpumask = read_req_cpumask(vcpu_hp_dev);
-	if(req_cpumask == NULL)
-		return  -ENOMEM;
-	req_cpumask_sz = read_req_cpumask_sz(vcpu_hp_dev); 
-	online_mask = kmalloc(sizeof(struct cpumask), GFP_KERNEL);
-        possible_mask = kmalloc(sizeof(struct cpumask), GFP_KERNEL);
-	cpumask_copy(online_mask,cpu_online_mask);
-	cpumask_copy(possible_mask, cpu_possible_mask);
- 	online_cpumask_bits = (unsigned int *)cpumask_bits(online_mask);
-	possible_cpumask_bits = (unsigned int *)cpumask_bits(possible_mask);
+	vcpu_mask_sz = read_mask_sz(vcpu_hp_dev);
+	vcpu_mask_bits = vcpu_mask_sz * 8;
 
-	max_iter = min((unsigned int)nr_cpumask_bits, req_cpumask_sz * 8);
-	printk(KERN_NOTICE "max iter %d\n", max_iter);
-	bytes = kmalloc(max_iter, GFP_KERNEL);
-	while(i < max_iter) {
-		if(!cpumask_test_cpu(i, cpu_possible_mask))
+	read_req_mask(vcpu_hp_dev, vcpu_mask, vcpu_mask_sz);
+
+	for (i = 0; i < vcpu_mask_bits; i++) {
+		unsigned int off_byte, off_bit;
+		off_byte = i / 8; off_bit = i % 8;
+
+		if (i >= nr_cpumask_bits || !cpu_possible(i)) {
+			vcpu_mask[off_byte] &= ~(1 << off_bit);
 			continue;
-		req_mask = 1 << i;
-		byte_mask = (1 << (i % 8));
-		online = *online_cpumask_bits & req_mask ? 1 : 0;
-		if((i > 0) && ((i % 8) == 0)) {
-			byte_counter++;
-			byte_mask = 1;
 		}
-		request = req_cpumask[byte_counter] & byte_mask ? 1 : 0;
-		if(!online && request) {
-			cpu_up(i);
-		} else if (online && !request) {
-			cpu_down(i);
+
+		/* If VCPU is requested to be online, and it's not, online it.
+		   If VCPU is requested to be offline,and it's not, offline it. */
+
+		if (vcpu_mask[off_byte] & (1 << off_bit)) {
+			if (!cpu_online(i))
+				if (cpu_up(i) != 0)
+					vcpu_mask[off_byte] &= ~(1 << off_bit);
+		} else {
+			if (cpu_online(i))
+				if (cpu_down(i) != 0)
+					vcpu_mask[off_byte] |= (1 << off_bit);
 		}
-	i++;
 	} 
-	printk(KERN_NOTICE "Writing online cpumask back to Qemu\n");
-	cpumask_copy(online_mask,cpu_online_mask);
-	online_cpumask_bits = (unsigned int *)cpumask_bits(online_mask);
-	printk(KERN_NOTICE "cpumask online bits %u\n", *online_cpumask_bits);
-	for(i = max_iter - 1; i > 0; i--) {
-		bytes[i] = (*online_cpumask_bits >> (i * 8)) & 0xFF;
-  		//printk(KERN_NOTICE "bytes %d %x", i, (unsigned char)bytes[i]);
-		iowrite8(bytes[i], vcpu_hp_dev->virt_base_addr + VCPU_HP_HEADER_N + req_cpumask_sz + i);
-	}
-	bytes[i] = *online_cpumask_bits & 0xFF;
-	iowrite8(bytes[i], vcpu_hp_dev->virt_base_addr + VCPU_HP_HEADER_N + req_cpumask_sz + i);
-	//printk(KERN_NOTICE "bytes %d %x", i, (unsigned char)bytes[i]);
-	
 
-	kfree(req_cpumask);
-	kfree(online_mask);
-	kfree(possible_mask);
-	kfree(bytes);
-	return 0;
-	
-}	
+	print_mask(vcpu_mask, vcpu_mask_sz);
+	printk(KERN_NOTICE "writing online cpumask response back to Qemu\n");
 
+	write_resp_mask(vcpu_hp_dev, vcpu_mask, vcpu_mask_sz);
+}
 
-
-int cpumask_thread(void *data) {
-
+__cpuinit int cpumask_thread(void *data)
+{
 	struct vcpu_hotplug_dev *vcpu_hp_dev = (struct vcpu_hotplug_dev *)data;
 	wait_queue_t thread_wait;
 
-	while(1) {
+	while (1) {
+		/* creates and init wait queue entry
+		 * attach current thread into entry */
+		init_wait(&thread_wait);
 
-	/* creates and init wait queue entry
-	* attach current thread into entry */
-	init_wait(&thread_wait);
+		/* allow delivery of SIGKILL */
+		allow_signal(SIGKILL);
 
-	/* allow devivery of SIGKILL */
-	allow_signal(SIGKILL);
+		/* adds current thread to thread_wq and set process state
+		 * TSK_INTERRUPTIBLE */
+		/* exclusive flag start just one thread (others sleep) in time
+		 * in orderly manner */
+		prepare_to_wait_exclusive(&kthread_wq, &thread_wait, TASK_INTERRUPTIBLE);
+		if (!cpumask_flag)
+			schedule();   /* in schedule() return change thread state TASK_RUNNING */
 
-	/* adds current thread to thread_wq and set process state
-	* TSK_INTERRUPTIBLE */
-	/* exclusive flag start just one thread (others sleep) in time
-	* in orderly manner */
-	prepare_to_wait_exclusive(&kthread_wq, &thread_wait, TASK_INTERRUPTIBLE);
-	if(!cpumask_flag)
-		schedule();   /*in schedule() return change thread state TASK_RUNNING */
+		/* removes current thread from thread wait_wq */
+		finish_wait(&kthread_wq, &thread_wait);
 
-	/*removes current thread from thread wait_wq */
-	finish_wait(&kthread_wq, &thread_wait);
-	if(signal_pending(current))
-		return -ERESTARTSYS;
-	cpumask_flag = 0;
-	printk(KERN_NOTICE "cpumask thread running\n");
-	modify_cpumask(vcpu_hp_dev);
+		if (signal_pending(current)) {
+			pr_warning("killed by signal");
+			return -ERESTARTSYS;
+		}
+
+                cpumask_flag = 0;
+                pr_notice("cpumask thread running");
+                modify_cpumask(vcpu_hp_dev);
 	}
 	return 0;
 }

@@ -1,6 +1,6 @@
 /* VCPU Hotplug device driver for VExpress
  *
- * Copyright (c) 2012 Huawei Technologies Duesseldorf GmbH
+ * Copyright (c) 2013 Huawei Technologies Duesseldorf GmbH
  * Written by Jani Kokkonen
  *
  * This code is licensed under the GPLv2: you can redistribute it and/or modify
@@ -33,15 +33,12 @@
 #include "vcpu_hotplug_dev.h"
 #include "cpumask_thread.h"
 
-static struct vcpu_hotplug_dev *vcpu_hotplug_device;
-static struct resource *mem_region;
-static dev_t dev;
+static struct vcpu_hotplug_dev vcpu_hp;
 
-/*******************************************************
-* print all cpu masks
-*******************************************************/
+#undef pr_fmt
+#define pr_fmt(fmt) "vcpu_hotplug_dev: " fmt ".\n"
 
-int print_masks(char *buffer)
+static int print_masks(char *buffer)
 {
 	const struct {
 		const char *text; const struct cpumask *mask;
@@ -56,18 +53,14 @@ int print_masks(char *buffer)
 
 	for (i = 0; cpumasks[i].text != NULL; i++) {
 		if (cpulist_scnprintf(buffer, PAGE_SIZE, cpumasks[i].mask) != 0)
-			printk(KERN_NOTICE "%s %s\n", cpumasks[i].text, buffer);
+			pr_notice("%s %s", cpumasks[i].text, buffer);
 		else
-			printk(KERN_NOTICE "%s print error\n", cpumasks[i].text);
+			pr_notice("%s print error", cpumasks[i].text);
 	}
 	return 0;
 }
 
-/***********************************************************
-* test cpumask
-***********************************************************/
-
-__cpuinit int test_cpumask(void)
+__cpuinit static int test_cpumask(void)
 {
 	int cpu;
 	char *buffer;
@@ -78,7 +71,7 @@ __cpuinit int test_cpumask(void)
 		return -ENOMEM;
 
 	/* offline one cpu */
-	printk(KERN_NOTICE "single cpu removed from online mask\n");
+	pr_notice("single cpu removed from online mask");
 	cpu_down(1);
 	print_masks(buffer);
 
@@ -97,10 +90,19 @@ __cpuinit int test_cpumask(void)
 	return 0;
 }
 
-/********************************************************************
-* TESTING fileops write()
-*********************************************************************/
-__cpuinit ssize_t vcpu_hotplug_device_write_test(struct file *filp,
+/* fileops open function */
+static int vcpu_hotplug_device_open(struct inode *inode, struct file *filp)
+{
+	struct vcpu_hotplug_dev *dev;
+	dev = container_of(inode->i_cdev, struct vcpu_hotplug_dev, cdev);
+	filp->private_data = dev;
+	return 0;
+}
+
+/*
+ * TESTING fileops write()
+ */
+__cpuinit static ssize_t vcpu_hotplug_device_write_test(struct file *filp,
 			const char __user *buf, size_t count, loff_t *f_pos)
 {
 	/* start cpumask thread */
@@ -109,10 +111,8 @@ __cpuinit ssize_t vcpu_hotplug_device_write_test(struct file *filp,
 	return count;
 }
 
-/********************************************************************
-* fileops write()
-*********************************************************************/
-__cpuinit ssize_t vcpu_hotplug_device_write(struct file *filp,
+/* fileops write function */
+__cpuinit static ssize_t vcpu_hotplug_device_write(struct file *filp,
 			const char __user *buf, size_t count, loff_t *f_pos)
 {
 	/* struct vcpu_hotplug_dev *dev = filp->private_data; */
@@ -132,7 +132,7 @@ __cpuinit ssize_t vcpu_hotplug_device_write(struct file *filp,
 
 	/* copy from user space */
 	if (copy_from_user(buffer, buf, count)) {
-		printk(KERN_NOTICE "copy_from_user failed.\n");
+		pr_notice("copy_from_user failed");
 		retval = -EFAULT;
 		goto out;
 	}
@@ -140,73 +140,53 @@ __cpuinit ssize_t vcpu_hotplug_device_write(struct file *filp,
 	*f_pos += count;
 	retval += count;
 
-	printk(KERN_NOTICE "received %s from user\n", buffer);
+	pr_notice("received %s from user", buffer);
 
 	/* clean the buffer */
 	memset(buffer, 0, PAGE_SIZE);
 
 	/* print initial cpu mask setup */
-	printk(KERN_NOTICE "original masks\n");
+	pr_notice("original masks");
 	print_masks(buffer);
 
 	/* test cpumask operations */
 	test_cpumask();
 out:
 	kfree(buffer);
-	//up(&dev->sem);
-	printk(KERN_WARNING "leaving fileops write\n");
+	/* up(&dev->sem); */
+	pr_warn("leaving fileops write");
 	return retval;
 }
 
-/********************************************************************************************
- *  fileops read() function
- ********************************************************************************************/
-ssize_t vcpu_hotplug_device_read(struct file *filp, char __user *buf,
-				size_t count, loff_t *f_pos)
+/* fileops read function */
+static ssize_t vcpu_hotplug_device_read(struct file *filp, char __user *buf,
+					size_t count, loff_t *f_pos)
 {
-	struct vcpu_hotplug_dev *dev = filp->private_data;
 	int value;
-	void __iomem *io_address = __io_address(VCPU_HOTPLUG_DEVICE_BASE);
+	struct vcpu_hotplug_dev *dev = filp->private_data;
+	void __iomem *io_address = __io_address(VCPU_HOTPLUG_DEV_BASE);
 	/* Request unique access
 	if (down_interruptible(&dev->sem))
 		return -ERESTARTSYS;
 	*/
-
-	printk(KERN_NOTICE
-		"phy_base_addr: %x, virt_base_addr(io_address): %p virt_base_addr_ioremap %p\n",
+	pr_notice("phy_base_addr: %x, virt_base_addr(io_address): %p virt_base_addr_ioremap %p\n",
 		(int)dev->phy_base_addr,
 		(int *)io_address,
 		(int *)dev->virt_base_addr);
 
 	value = ioread32(dev->virt_base_addr + 0x4);
 	printk(KERN_WARNING "device s->level value %x", value);
-
-	//up(&dev->sem);
+	/* up(&dev->sem); */
 	return 0;
 }
 
-/******************************************************************
- * fileops open() function
- ******************************************************************/
-int vcpu_hotplug_device_open(struct inode *inode, struct file *filp)
-{
-	struct vcpu_hotplug_dev *dev;
-
-	dev = container_of(inode->i_cdev, struct vcpu_hotplug_dev, cdev);
-	filp->private_data = dev;
-
-	return 0;
-}
-
-/******************************************************************
- * fileops release()
- *****************************************************************/
-int vcpu_hotplug_device_release(struct inode *inode, struct file *filp)
+/* fileops release function */
+static int vcpu_hotplug_device_release(struct inode *inode, struct file *filp)
 {
 	return 0;
 }
 
-__refdata struct file_operations vcpu_hotplug_device_fops = {
+__refdata static struct file_operations vcpu_hotplug_device_fops = {
 	.owner = NULL,
 	.read = vcpu_hotplug_device_read,
 	.write = vcpu_hotplug_device_write_test,
@@ -214,47 +194,41 @@ __refdata struct file_operations vcpu_hotplug_device_fops = {
 	.release = vcpu_hotplug_device_release,
 };
 
-/*********************************************************
- * platform device remove()
- *********************************************************/
-
-static __devexit int vcpu_hotplug_device_remove(struct platform_device *pdev)
+/* platform device driver remove function */
+__devexit static int vcpu_hotplug_device_remove(struct platform_device *pdev)
 {
-	if (vcpu_hotplug_device->irq > 0)
-		free_irq(vcpu_hotplug_device->irq, NULL);
+	if (vcpu_hp.irq > 0)
+		free_irq(vcpu_hp.irq, NULL);
 
-	if (vcpu_hotplug_device->virt_base_addr)
-		iounmap(vcpu_hotplug_device->virt_base_addr);
+	if (vcpu_hp.virt_base_addr != NULL)
+		iounmap(vcpu_hp.virt_base_addr);
 
-	if (mem_region)
-		release_mem_region(vcpu_hotplug_device->phy_base_addr->start,
-				resource_size(vcpu_hotplug_device->phy_base_addr));
+	if (vcpu_hp.io_region != NULL)
+		release_mem_region(vcpu_hp.phy_base_addr->start,
+				resource_size(vcpu_hp.phy_base_addr));
 
-	if (vcpu_hotplug_device->cdev.dev != 0)
-		cdev_del(&vcpu_hotplug_device->cdev);
+	if (vcpu_hp.cdev.dev != 0)
+		cdev_del(&vcpu_hp.cdev);
 
-	if (dev != 0)
-		unregister_chrdev_region(dev, VCPU_HOTPLUG_DEVICE_COUNT);
+	if (vcpu_hp.devid != 0)
+		unregister_chrdev_region(vcpu_hp.devid, VCPU_HOTPLUG_DEV_COUNT);
 
-	kfree(vcpu_hotplug_device);
 	return 0;
 }
 
-/*******************************************************
-* handle_vcpu_irq();
-*******************************************************/
+/* platform device driver irq handler */
 static irqreturn_t handle_vcpu_irq(int irq, void *opaque)
 {
 	irqreturn_t ret = IRQ_NONE;
-	unsigned long value;
+	unsigned long ctrl;
 	static int i = 0;
-	printk(KERN_ALERT "Entered IRQ handler %d\n", i++);
-	/*read control byte */
-	value = ioread8(vcpu_hotplug_device->virt_base_addr + VCPU_HP_HEADER_CTRL);
-	printk(KERN_ALERT "CTRL byte value is %lu.\n", value);
-	/*disable IRQ */
-	clear_bit(0,&value);
-	iowrite8(value, vcpu_hotplug_device->virt_base_addr + VCPU_HP_HEADER_CTRL);
+	pr_alert("entered IRQ handler %d", i++);
+	/* read control byte */
+	ctrl = ioread8(vcpu_hp.virt_base_addr + VCPU_HP_HEADER_CTRL);
+	pr_alert("CTRL byte value is 0x%02lx", ctrl);
+	/* clear IPR */
+	clear_bit(VCPU_HP_CTRL_IPR, &ctrl);
+	iowrite8(ctrl, vcpu_hp.virt_base_addr + VCPU_HP_HEADER_CTRL);
 	/* start cpumask thread */
 	cpumask_flag = 1;
 	wake_up_interruptible(&kthread_wq);
@@ -262,48 +236,38 @@ static irqreturn_t handle_vcpu_irq(int irq, void *opaque)
 	return ret;
 }
 
-/********************************************************
- * platform driver probe() function
- *******************************************************/
-static __devinit int vcpu_hotplug_device_probe(struct platform_device *pdev)
+/* platform device driver probe function */
+__devinit static int vcpu_hotplug_device_probe(struct platform_device *pdev)
 {
 	int res;
-	/* allocate memory for vcpu_hotplug_device */
-	vcpu_hotplug_device =
-		kmalloc(sizeof(struct vcpu_hotplug_dev), GFP_KERNEL);
-
-	if (vcpu_hotplug_device == NULL) {
-		return -ENOMEM;
-	}
 	/* Fill the vcpu_hotplug_device region with zeros */
-	memset(vcpu_hotplug_device, 0, sizeof(struct vcpu_hotplug_dev));
+	memset(&vcpu_hp, 0, sizeof(struct vcpu_hotplug_dev));
 
 	/* allocate device number */
-	res = alloc_chrdev_region(&dev, VCPU_HOTPLUG_DEVICE_MINOR_START,
-				VCPU_HOTPLUG_DEVICE_COUNT,
-				VCPU_HOTPLUG_DEVICE_NAME);
+	res = alloc_chrdev_region(&vcpu_hp.devid, VCPU_HOTPLUG_DEV_MINOR_START,
+				VCPU_HOTPLUG_DEV_COUNT,
+				VCPU_HOTPLUG_DEV_NAME);
 	if (res != 0) {
-		printk(KERN_ERR "could not allocate device\n");
+		pr_err("could not allocate char device");
 		goto fail;
 
 	} else {
-		printk(KERN_WARNING "registered with major number:%i\n",
-			MAJOR(dev));
+		pr_warn("registered with major number:%i",
+			MAJOR(vcpu_hp.devid));
 	}
-
-	//sema_init(&vcpu_hotplug_device->sem, 1);
-	cdev_init(&vcpu_hotplug_device->cdev, &vcpu_hotplug_device_fops);
-	vcpu_hotplug_device->cdev.owner = NULL;
-	vcpu_hotplug_device->cdev.ops = &vcpu_hotplug_device_fops;
-	res = cdev_add(&vcpu_hotplug_device->cdev, MKDEV(MAJOR(dev), MINOR(dev)), 1);
+	/* sema_init(&vcpu_hotplug_device.sem, 1); */
+	cdev_init(&vcpu_hp.cdev, &vcpu_hotplug_device_fops);
+	vcpu_hp.cdev.owner = NULL;
+	vcpu_hp.cdev.ops = &vcpu_hotplug_device_fops;
+	res = cdev_add(&vcpu_hp.cdev,
+		MKDEV(MAJOR(vcpu_hp.devid), MINOR(vcpu_hp.devid)), 1);
 
 	if (res != 0) {
-		printk(KERN_ERR "Error %d adding vcpu_hotplug_device\n",
-			res);
+		pr_err("error %d adding vcpu hotplug device\n",	res);
 		goto fail;
 
 	} else {
-		printk(KERN_WARNING "vcpu_hotplug_device added\n");
+		pr_warn("vcpu hotplug device added");
 	}
 
 	/* add proc entry: TODO */
@@ -315,53 +279,50 @@ static __devinit int vcpu_hotplug_device_probe(struct platform_device *pdev)
 
 	/* start setting up platform device operations */
 	/* get vcpu hotplug device base address */
-	vcpu_hotplug_device->phy_base_addr =
-		platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	vcpu_hp.phy_base_addr = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 
-	if (!vcpu_hotplug_device->phy_base_addr) {
-		printk(KERN_ERR "vcpu_hotplug_device: could not get platform resource.\n");
+	if (!vcpu_hp.phy_base_addr) {
+		pr_err("could not get platform resource");
 		res = -EINVAL;
 		goto fail;
 	}
 
 	/* register io resource to kernel */
-	mem_region = request_mem_region(vcpu_hotplug_device->phy_base_addr->start,
-					resource_size(vcpu_hotplug_device->phy_base_addr),
+	vcpu_hp.io_region = request_mem_region(vcpu_hp.phy_base_addr->start,
+					resource_size(vcpu_hp.phy_base_addr),
 					"vcpu_hotplug_dev");
-	if (!mem_region) {
-		printk(KERN_ERR "vcpu_hotplug_dev: cannot register I/O memory\n");
+	if (!vcpu_hp.io_region) {
+		pr_err("cannot register I/O memory");
 		res = -EBUSY;
 		goto fail;
 	}
 
-	vcpu_hotplug_device->virt_base_addr =
-		ioremap(VCPU_HOTPLUG_DEVICE_BASE, PAGE_SIZE - 1);
-	if (!vcpu_hotplug_device->virt_base_addr) {
-		printk(KERN_ERR "vcpu_hotplug_device: ioremap failed.\n");
+	vcpu_hp.virt_base_addr = ioremap(VCPU_HOTPLUG_DEV_BASE, PAGE_SIZE - 1);
+	if (!vcpu_hp.virt_base_addr) {
+		pr_err("ioremap failed");
 		res = -EINVAL;
 		goto fail;
 	}
 
 	/* get vcpu hotplug device irq number and register irq handler */
-	vcpu_hotplug_device->irq = platform_get_irq(pdev, 0);
-	if (vcpu_hotplug_device->irq < 0) {
-		printk(KERN_ERR "vcpu_hotplug_device: failed to get platform IRQ.\n");
-		res = vcpu_hotplug_device->irq;
+	vcpu_hp.irq = platform_get_irq(pdev, 0);
+	if (vcpu_hp.irq < 0) {
+		pr_err("failed to get platform IRQ");
+		res = vcpu_hp.irq;
 		goto fail;
 	}
 
-	printk(KERN_NOTICE "vcpu hotplug dev irq %d\n", vcpu_hotplug_device->irq);
+	pr_notice("using irq %d", vcpu_hp.irq);
 
 	/* registering non-shared irq line */
-	res = request_irq(vcpu_hotplug_device->irq, handle_vcpu_irq, 0,
-			"VPCU_IRQ_HANDLER", NULL);
+	res = request_irq(vcpu_hp.irq, handle_vcpu_irq, 0,
+			"vcpu_hotplug_dev", NULL);
 	if (res < 0) {
-		printk(KERN_ERR "vcpu_hotplug_dev: cannot register IRQ %d\n",
-			vcpu_hotplug_device->irq);
+		pr_err("cannot register IRQ %d", vcpu_hp.irq);
 		goto fail;
 	}
-	/*create kernel thread */
-	kthread_run(cpumask_thread, vcpu_hotplug_device, "cpumask_thread");
+	/* create kernel thread */
+	kthread_run(cpumask_thread, &vcpu_hp, "cpumask_thread");
 	return 0;
 
 fail:
@@ -378,7 +339,7 @@ static struct platform_driver vcpu_hotplug_driver = {
 	},
 };
 
-static int __init vcpu_hotplug_driver_init(void)
+__init static int vcpu_hotplug_driver_init(void)
 {
 	int ret;
 	ret = platform_driver_register(&vcpu_hotplug_driver);
@@ -393,7 +354,7 @@ static int __init vcpu_hotplug_driver_init(void)
 	return ret;
 }
 
-static void __exit vcpu_hotplug_driver_exit(void)
+__exit static void vcpu_hotplug_driver_exit(void)
 {
 	platform_driver_unregister(&vcpu_hotplug_driver);
 }
