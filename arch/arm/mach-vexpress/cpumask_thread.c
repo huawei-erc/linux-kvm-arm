@@ -8,6 +8,9 @@
 #include <linux/cpu.h>
 #include "vcpu_hotplug_dev.h"
 
+#undef pr_fmt
+#define pr_fmt(fmt) "cpumask_thread: " fmt ".\n"
+
 int cpumask_flag = 0;
 DECLARE_WAIT_QUEUE_HEAD(kthread_wq);
 
@@ -48,7 +51,7 @@ static void write_resp_mask(struct vcpu_hotplug_dev *vcpu_hp_dev,
 
 static void print_mask(unsigned char *mask, unsigned int n)
 {
-	printk(KERN_NOTICE "vcpu mask: %*phC\n", n, mask);
+	pr_notice("vcpu mask: %*phC\n", n, mask);
 }
 
 __cpuinit void modify_cpumask(struct vcpu_hotplug_dev *vcpu_hp_dev)
@@ -62,7 +65,10 @@ __cpuinit void modify_cpumask(struct vcpu_hotplug_dev *vcpu_hp_dev)
 
 	read_req_mask(vcpu_hp_dev, vcpu_mask, vcpu_mask_sz);
 
-	for (i = 0; i < vcpu_mask_bits; i++) {
+	/* always keep CPU0 online */
+	vcpu_mask[0] |= 0x01;
+
+	for (i = 1; i < vcpu_mask_bits; i++) {
 		unsigned int off_byte, off_bit;
 		off_byte = i / 8; off_bit = i % 8;
 
@@ -83,10 +89,10 @@ __cpuinit void modify_cpumask(struct vcpu_hotplug_dev *vcpu_hp_dev)
 				if (cpu_down(i) != 0)
 					vcpu_mask[off_byte] |= (1 << off_bit);
 		}
-	} 
+	}
 
 	print_mask(vcpu_mask, vcpu_mask_sz);
-	printk(KERN_NOTICE "writing online cpumask response back to Qemu\n");
+	pr_notice("writing online cpumask response back to Qemu");
 
 	write_resp_mask(vcpu_hp_dev, vcpu_mask, vcpu_mask_sz);
 }
