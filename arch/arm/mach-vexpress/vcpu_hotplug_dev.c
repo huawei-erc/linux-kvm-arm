@@ -107,7 +107,7 @@ __cpuinit static ssize_t vcpu_hotplug_device_write_test(struct file *filp,
 {
 	/* start cpumask thread */
 	cpumask_flag = 1;
-	wake_up_interruptible(&kthread_wq);
+	wake_up_interruptible(&cpumask_wq);
 	return count;
 }
 
@@ -231,7 +231,7 @@ static irqreturn_t handle_vcpu_irq(int irq, void *opaque)
 	iowrite8(ctrl, vcpu_hp.virt_base_addr + VCPU_HP_HEADER_CTRL);
 	/* start cpumask thread */
 	cpumask_flag = 1;
-	wake_up_interruptible(&kthread_wq);
+	wake_up_interruptible(&cpumask_wq);
 	ret = IRQ_HANDLED;
 	return ret;
 }
@@ -321,8 +321,19 @@ __devinit static int vcpu_hotplug_device_probe(struct platform_device *pdev)
 		pr_err("cannot register IRQ %d", vcpu_hp.irq);
 		goto fail;
 	}
-	/* create kernel thread */
-	kthread_run(cpumask_thread, &vcpu_hp, "cpumask_thread");
+	/* create and wake up kernel thread */
+	{
+		struct task_struct *p;
+		p = kthread_create_on_node(cpumask_thread, &vcpu_hp,
+					   cpu_to_node(0),
+					   "cpumask_thread/%d", 0);
+		if (IS_ERR(p)) {
+			pr_err("cannot create cpumask kthread");
+			goto fail;
+		}
+		kthread_bind(p, 0);
+		wake_up_process(p);
+	}
 	return 0;
 
 fail:

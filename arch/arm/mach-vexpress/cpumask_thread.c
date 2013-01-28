@@ -12,7 +12,7 @@
 #define pr_fmt(fmt) "cpumask_thread: " fmt ".\n"
 
 int cpumask_flag = 0;
-DECLARE_WAIT_QUEUE_HEAD(kthread_wq);
+DECLARE_WAIT_QUEUE_HEAD(cpumask_wq);
 
 #define MASK_SZ_MAX 0xff
 
@@ -81,13 +81,31 @@ __cpuinit void modify_cpumask(struct vcpu_hotplug_dev *vcpu_hp_dev)
 		   If VCPU is requested to be offline,and it's not, offline it. */
 
 		if (vcpu_mask[off_byte] & (1 << off_bit)) {
-			if (!cpu_online(i))
-				if (cpu_up(i) != 0)
+			pr_notice("VCPU%d requested online", i);
+			if (!cpu_online(i)) {
+				pr_notice("VCPU%d not online: onlining..", i);
+				if (cpu_up(i) != 0) {
+					pr_notice("VCPU%d ...cpu_up failed", i);
 					vcpu_mask[off_byte] &= ~(1 << off_bit);
+				} else {
+					pr_notice("VCPU%d ...cpu_up complete", i);
+				}
+			} else {
+				pr_notice("VCPU%d already online", i);
+			}
 		} else {
-			if (cpu_online(i))
-				if (cpu_down(i) != 0)
+			pr_notice("VCPU%d requested offline", i);
+			if (cpu_online(i)) {
+				pr_notice("VCPU%d is online: offlining..", i);
+				if (cpu_down(i) != 0) {
+					pr_notice("VCPU%d ...cpu_down failed", i);
 					vcpu_mask[off_byte] |= (1 << off_bit);
+				} else {
+					pr_notice("VCPU%d ...cpu_down complete", i);
+				}
+			} else {
+				pr_notice("VCPU%d already offline", i);
+			}
 		}
 	}
 
@@ -99,31 +117,16 @@ __cpuinit void modify_cpumask(struct vcpu_hotplug_dev *vcpu_hp_dev)
 
 __cpuinit int cpumask_thread(void *data)
 {
-	struct vcpu_hotplug_dev *vcpu_hp_dev = (struct vcpu_hotplug_dev *)data;
-	wait_queue_t thread_wait;
+	struct vcpu_hotplug_dev *vcpu_hp_dev = data;
 
 	while (1) {
-		/* creates and init wait queue entry
-		 * attach current thread into entry */
-		init_wait(&thread_wait);
-
-		/* allow delivery of SIGKILL */
+		int ret;
 		allow_signal(SIGKILL);
+		ret = wait_event_interruptible(cpumask_wq, cpumask_flag != 0);
 
-		/* adds current thread to thread_wq and set process state
-		 * TSK_INTERRUPTIBLE */
-		/* exclusive flag start just one thread (others sleep) in time
-		 * in orderly manner */
-		prepare_to_wait_exclusive(&kthread_wq, &thread_wait, TASK_INTERRUPTIBLE);
-		if (!cpumask_flag)
-			schedule();   /* in schedule() return change thread state TASK_RUNNING */
-
-		/* removes current thread from thread wait_wq */
-		finish_wait(&kthread_wq, &thread_wait);
-
-		if (signal_pending(current)) {
-			pr_warning("killed by signal");
-			return -ERESTARTSYS;
+		if (ret < 0) {
+			pr_warning("received signal, thread exiting");
+			return ret;
 		}
 
                 cpumask_flag = 0;
@@ -132,6 +135,3 @@ __cpuinit int cpumask_thread(void *data)
 	}
 	return 0;
 }
-
-
-
