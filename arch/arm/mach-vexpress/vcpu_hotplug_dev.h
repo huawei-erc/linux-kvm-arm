@@ -9,12 +9,8 @@ struct vcpu_hotplug_dev {
 	void __iomem *virt_base_addr;
 
 	dev_t devid;
-	struct cdev cdev;
 
 	unsigned int irq;
-	char *buffer;
-	unsigned long size;
-	/* struct semaphore sem; */
 };
 
 /* VCPU HP header bytes offsets */
@@ -50,18 +46,3 @@ enum vcpu_hp_ctrl {
 
     VCPU_HP_CTRL_N
 };
-/* CTRLreg helpers */
-static int vcpu_hp_get_creg(unsigned char *ctrl, enum vcpu_hp_ctrl reg)
-{
-    return *ctrl & (1 << reg) ? 1 : 0;
-}
-
-static void vcpu_hp_set_creg(unsigned char *ctrl, enum vcpu_hp_ctrl reg)
-{
-    *ctrl |= (1 << reg);
-}
-
-static void vcpu_hp_clear_creg(unsigned char *ctrl, enum vcpu_hp_ctrl reg)
-{
-    *ctrl &= ~(1 << reg);
-}
