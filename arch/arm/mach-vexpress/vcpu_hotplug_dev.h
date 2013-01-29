@@ -8,6 +8,7 @@ struct vcpu_hotplug_dev {
 	struct resource *io_region;
 	void __iomem *virt_base_addr;
 	struct task_struct *kthread;
+	struct completion complete;
 
 	dev_t devid;
 

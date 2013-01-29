@@ -41,9 +41,9 @@ static irqreturn_t handle_vcpu_irq(int irq, void *dev_id)
 	/* clear IPR */
 	clear_bit(VCPU_HP_CTRL_IPR, &ctrl);
 	iowrite8(ctrl, vcpu->virt_base_addr + VCPU_HP_HEADER_CTRL);
+
 	/* start cpumask thread */
-	cpumask_flag = 1;
-	wake_up_interruptible(&cpumask_wq);
+	complete(&vcpu->complete);
 
 	return IRQ_HANDLED;
 }

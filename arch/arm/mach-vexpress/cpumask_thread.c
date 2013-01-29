@@ -11,9 +11,6 @@
 #undef pr_fmt
 #define pr_fmt(fmt) "cpumask_thread: " fmt ".\n"
 
-int cpumask_flag = 0;
-DECLARE_WAIT_QUEUE_HEAD(cpumask_wq);
-
 #define MASK_SZ_MAX 0xff
 
 static unsigned int read_mask_sz(struct vcpu_hotplug_dev *vcpu_hp_dev)
@@ -117,14 +114,17 @@ __cpuinit void modify_cpumask(struct vcpu_hotplug_dev *vcpu_hp_dev)
 
 __cpuinit int cpumask_thread(void *data)
 {
-	struct vcpu_hotplug_dev *vcpu_hp_dev = data;
+	struct vcpu_hotplug_dev *vcpu = data;
+
+	init_completion(&vcpu->complete);
 
 	while (!kthread_should_stop()) {
 		int ret;
 
 		allow_signal(SIGKILL);
 
-		ret = wait_event_interruptible(cpumask_wq, cpumask_flag != 0 ||
+		ret = wait_event_interruptible(vcpu->complete.wait,
+					       vcpu->complete.done ||
 					       kthread_should_stop());
 		if (kthread_should_stop())
 			break;
@@ -133,9 +133,8 @@ __cpuinit int cpumask_thread(void *data)
 			return ret;
 		}
 
-                cpumask_flag = 0;
                 pr_notice("cpumask thread running");
-                modify_cpumask(vcpu_hp_dev);
+                modify_cpumask(vcpu);
 	}
 
 	return 0;
