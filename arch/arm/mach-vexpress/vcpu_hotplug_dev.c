@@ -10,7 +10,6 @@
  */
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
-#include <asm/uaccess.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -22,11 +21,11 @@
 #include <linux/wait.h>
 #include <linux/platform_device.h>
 #include <linux/io.h>
-#include <asm-generic/sizes.h>
-#include <mach/hardware.h>
+#include <linux/sizes.h>
 #include <linux/cpumask.h>
 #include <linux/cpu.h>
 #include <linux/interrupt.h>
+#include <mach/hardware.h>
 #include "vcpu_hotplug_dev.h"
 #include "cpumask_thread.h"
 
@@ -51,7 +50,7 @@ static irqreturn_t handle_vcpu_irq(int irq, void *opaque)
 }
 
 /* platform device driver probe function */
-__devinit static int vcpu_hotplug_device_probe(struct platform_device *pdev)
+static int __devinit vcpu_hotplug_device_probe(struct platform_device *pdev)
 {
 	int res;
 	/* start setting up platform device operations */
@@ -123,22 +122,12 @@ static struct platform_driver vcpu_hotplug_driver = {
 	},
 };
 
-__init static int vcpu_hotplug_driver_init(void)
+static int __init vcpu_hotplug_driver_init(void)
 {
-	int ret;
-	ret = platform_driver_register(&vcpu_hotplug_driver);
-	if (ret) {
-		printk(KERN_ALERT "vcpu_hotplug_driver_init: "
-			"failed to register driver!\n");
-	} else {
-		printk(KERN_ALERT "vcpu_hotplug_driver_init: "
-			"registered driver successfully.\n");
-	}
-
-	return ret;
+	return platform_driver_register(&vcpu_hotplug_driver);
 }
 
-__exit static void vcpu_hotplug_driver_exit(void)
+static void __exit vcpu_hotplug_driver_exit(void)
 {
 	platform_driver_unregister(&vcpu_hotplug_driver);
 }
