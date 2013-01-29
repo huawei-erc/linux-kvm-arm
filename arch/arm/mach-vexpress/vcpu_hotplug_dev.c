@@ -25,6 +25,7 @@
 #include <linux/cpumask.h>
 #include <linux/cpu.h>
 #include <linux/interrupt.h>
+#include <linux/module.h>
 #include <mach/hardware.h>
 #include "vcpu_hotplug_dev.h"
 #include "cpumask_thread.h"
@@ -118,7 +119,7 @@ static struct platform_driver vcpu_hotplug_driver = {
 	.probe = vcpu_hotplug_device_probe,
 	.driver = {
 		.name = "vcpu_hotplug_device",
-		.owner = NULL,
+		.owner = THIS_MODULE,
 	},
 };
 
