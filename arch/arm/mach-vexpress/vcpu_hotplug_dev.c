@@ -8,6 +8,7 @@
  * the Free Software Foundation, either version 2 of the License, or
  * (at your option) any later version.
  */
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <asm/uaccess.h>
 #include <linux/init.h>
@@ -30,9 +31,6 @@
 #include "cpumask_thread.h"
 
 static struct vcpu_hotplug_dev vcpu_hp;
-
-#undef pr_fmt
-#define pr_fmt(fmt) "vcpu_hotplug_dev: " fmt ".\n"
 
 /* platform device driver remove function */
 __devexit static int vcpu_hotplug_device_remove(struct platform_device *pdev)
