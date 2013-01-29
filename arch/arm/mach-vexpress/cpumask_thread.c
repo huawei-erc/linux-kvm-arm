@@ -1,49 +1,48 @@
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/kernel.h>
 #include <linux/kthread.h>
 #include <linux/wait.h>
 #include <linux/string.h>
 #include <linux/cdev.h>
-#include <asm/io.h>
+#include <linux/io.h>
 #include <linux/slab.h>
 #include <linux/cpu.h>
 #include "vcpu_hotplug_dev.h"
 
-#undef pr_fmt
-#define pr_fmt(fmt) "cpumask_thread: " fmt ".\n"
-
 #define MASK_SZ_MAX 0xff
 
-static unsigned int read_mask_sz(struct vcpu_hotplug_dev *vcpu_hp_dev)
+static unsigned int read_mask_sz(struct vcpu_hotplug_dev *vcpu)
 {
-	return ioread8(vcpu_hp_dev->virt_base_addr + VCPU_HP_HEADER_MASK_SZ);
+	return ioread8(vcpu->virt_base_addr + VCPU_HP_HEADER_MASK_SZ);
 }
 
-static void read_req_mask(struct vcpu_hotplug_dev *vcpu_hp_dev,
+static void read_req_mask(struct vcpu_hotplug_dev *vcpu,
 			unsigned char *mask, unsigned int mask_sz)
 {
 	unsigned int i;
 	for (i = 0; i < mask_sz; i++)
-		mask[i] = ioread8(vcpu_hp_dev->virt_base_addr
+		mask[i] = ioread8(vcpu->virt_base_addr
 				+ VCPU_HP_HEADER_N + i);
 	mask[mask_sz] = 0xAA; /* end with something noticeable for testing. */
 }
 
-static void write_resp_mask(struct vcpu_hotplug_dev *vcpu_hp_dev,
+static void write_resp_mask(struct vcpu_hotplug_dev *vcpu,
 			unsigned char *mask, unsigned int mask_sz)
 {
 	unsigned int i; unsigned long ctrl;
 
 	for (i = 0; i < mask_sz; i++) {
-		iowrite8(mask[i], vcpu_hp_dev->virt_base_addr
+		iowrite8(mask[i], vcpu->virt_base_addr
 			+ VCPU_HP_HEADER_N + mask_sz + i);
 	}
 
 	/* read control byte */
-	ctrl = ioread8(vcpu_hp_dev->virt_base_addr + VCPU_HP_HEADER_CTRL);
+	ctrl = ioread8(vcpu->virt_base_addr + VCPU_HP_HEADER_CTRL);
 	/* clear HPR */
 	clear_bit(VCPU_HP_CTRL_HPR, &ctrl);
 	/* rewrite ctrl byte */
-	iowrite8(ctrl, vcpu_hp_dev->virt_base_addr + VCPU_HP_HEADER_CTRL);
+	iowrite8(ctrl, vcpu->virt_base_addr + VCPU_HP_HEADER_CTRL);
 }
 
 static void print_mask(unsigned char *mask, unsigned int n)
@@ -51,16 +50,16 @@ static void print_mask(unsigned char *mask, unsigned int n)
 	pr_notice("vcpu mask: %*phC\n", n, mask);
 }
 
-__cpuinit void modify_cpumask(struct vcpu_hotplug_dev *vcpu_hp_dev)
+static void __ref vcpu_update_cpu_maps(struct vcpu_hotplug_dev *vcpu)
 {
 	unsigned char vcpu_mask[MASK_SZ_MAX + 1] = { 0 };
 	unsigned int vcpu_mask_sz, i;
 	unsigned int vcpu_mask_bits;
 
-	vcpu_mask_sz = read_mask_sz(vcpu_hp_dev);
+	vcpu_mask_sz = read_mask_sz(vcpu);
 	vcpu_mask_bits = vcpu_mask_sz * 8;
 
-	read_req_mask(vcpu_hp_dev, vcpu_mask, vcpu_mask_sz);
+	read_req_mask(vcpu, vcpu_mask, vcpu_mask_sz);
 
 	/* always keep CPU0 online */
 	vcpu_mask[0] |= 0x01;
@@ -109,10 +108,10 @@ __cpuinit void modify_cpumask(struct vcpu_hotplug_dev *vcpu_hp_dev)
 	print_mask(vcpu_mask, vcpu_mask_sz);
 	pr_notice("writing online cpumask response back to Qemu");
 
-	write_resp_mask(vcpu_hp_dev, vcpu_mask, vcpu_mask_sz);
+	write_resp_mask(vcpu, vcpu_mask, vcpu_mask_sz);
 }
 
-__cpuinit int cpumask_thread(void *data)
+int cpumask_thread(void *data)
 {
 	struct vcpu_hotplug_dev *vcpu = data;
 
@@ -134,7 +133,7 @@ __cpuinit int cpumask_thread(void *data)
 		}
 
                 pr_notice("cpumask thread running");
-                modify_cpumask(vcpu);
+                vcpu_update_cpu_maps(vcpu);
 	}
 
 	return 0;
