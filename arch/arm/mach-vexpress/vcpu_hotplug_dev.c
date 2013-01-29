@@ -21,8 +21,8 @@
 #include <linux/capability.h>
 #include <linux/wait.h>
 #include <linux/platform_device.h>
+#include <linux/io.h>
 #include <asm-generic/sizes.h>
-#include <asm/io.h>
 #include <mach/hardware.h>
 #include <linux/cpumask.h>
 #include <linux/cpu.h>
@@ -31,22 +31,6 @@
 #include "cpumask_thread.h"
 
 static struct vcpu_hotplug_dev vcpu_hp;
-
-/* platform device driver remove function */
-__devexit static int vcpu_hotplug_device_remove(struct platform_device *pdev)
-{
-	if (vcpu_hp.irq > 0)
-		free_irq(vcpu_hp.irq, NULL);
-
-	if (vcpu_hp.virt_base_addr != NULL)
-		iounmap(vcpu_hp.virt_base_addr);
-
-	if (vcpu_hp.io_region != NULL)
-		release_mem_region(vcpu_hp.phy_base_addr->start,
-				resource_size(vcpu_hp.phy_base_addr));
-
-	return 0;
-}
 
 /* platform device driver irq handler */
 static irqreturn_t handle_vcpu_irq(int irq, void *opaque)
@@ -76,44 +60,44 @@ __devinit static int vcpu_hotplug_device_probe(struct platform_device *pdev)
 
 	if (!vcpu_hp.phy_base_addr) {
 		pr_err("could not get platform resource");
-		res = -EINVAL;
-		goto fail;
+		return -EINVAL;
 	}
 
 	/* register io resource to kernel */
-	vcpu_hp.io_region = request_mem_region(vcpu_hp.phy_base_addr->start,
+	vcpu_hp.io_region = devm_request_mem_region(&pdev->dev,
+					vcpu_hp.phy_base_addr->start,
 					resource_size(vcpu_hp.phy_base_addr),
 					"vcpu_hotplug_dev");
 	if (!vcpu_hp.io_region) {
 		pr_err("cannot register I/O memory");
-		res = -EBUSY;
-		goto fail;
+		return -EBUSY;
 	}
 
-	vcpu_hp.virt_base_addr = ioremap(VCPU_HOTPLUG_DEV_BASE, PAGE_SIZE - 1);
+	/* XXX: size off by 1? */
+	vcpu_hp.virt_base_addr = devm_ioremap(&pdev->dev, VCPU_HOTPLUG_DEV_BASE,
+					      PAGE_SIZE - 1);
 	if (!vcpu_hp.virt_base_addr) {
 		pr_err("ioremap failed");
-		res = -EINVAL;
-		goto fail;
+		return -EINVAL;
 	}
 
 	/* get vcpu hotplug device irq number and register irq handler */
 	vcpu_hp.irq = platform_get_irq(pdev, 0);
 	if (vcpu_hp.irq < 0) {
 		pr_err("failed to get platform IRQ");
-		res = vcpu_hp.irq;
-		goto fail;
+		return vcpu_hp.irq;
 	}
 
 	pr_notice("using irq %d", vcpu_hp.irq);
 
 	/* registering non-shared irq line */
-	res = request_irq(vcpu_hp.irq, handle_vcpu_irq, 0,
+	res = devm_request_irq(&pdev->dev, vcpu_hp.irq, handle_vcpu_irq, 0,
 			"vcpu_hotplug_dev", NULL);
 	if (res < 0) {
 		pr_err("cannot register IRQ %d", vcpu_hp.irq);
-		goto fail;
+		return res;
 	}
+
 	/* create and wake up kernel thread */
 	{
 		struct task_struct *p;
@@ -122,21 +106,17 @@ __devinit static int vcpu_hotplug_device_probe(struct platform_device *pdev)
 					   "cpumask_thread/%d", 0);
 		if (IS_ERR(p)) {
 			pr_err("cannot create cpumask kthread");
-			goto fail;
+			return PTR_ERR(p);
 		}
 		kthread_bind(p, 0);
 		wake_up_process(p);
 	}
-	return 0;
 
-fail:
-	vcpu_hotplug_device_remove(pdev);
-	return res;
+	return 0;
 }
 
 static struct platform_driver vcpu_hotplug_driver = {
 	.probe = vcpu_hotplug_device_probe,
-	.remove = vcpu_hotplug_device_remove,
 	.driver = {
 		.name = "vcpu_hotplug_device",
 		.owner = NULL,
