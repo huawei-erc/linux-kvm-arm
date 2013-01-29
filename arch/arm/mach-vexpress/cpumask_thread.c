@@ -119,11 +119,15 @@ __cpuinit int cpumask_thread(void *data)
 {
 	struct vcpu_hotplug_dev *vcpu_hp_dev = data;
 
-	while (1) {
+	while (!kthread_should_stop()) {
 		int ret;
-		allow_signal(SIGKILL);
-		ret = wait_event_interruptible(cpumask_wq, cpumask_flag != 0);
 
+		allow_signal(SIGKILL);
+
+		ret = wait_event_interruptible(cpumask_wq, cpumask_flag != 0 ||
+					       kthread_should_stop());
+		if (kthread_should_stop())
+			break;
 		if (ret < 0) {
 			pr_warning("received signal, thread exiting");
 			return ret;
@@ -133,5 +137,6 @@ __cpuinit int cpumask_thread(void *data)
                 pr_notice("cpumask thread running");
                 modify_cpumask(vcpu_hp_dev);
 	}
+
 	return 0;
 }

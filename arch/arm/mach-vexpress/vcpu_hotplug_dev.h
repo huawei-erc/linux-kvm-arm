@@ -7,6 +7,7 @@ struct vcpu_hotplug_dev {
 	struct resource *phy_base_addr;
 	struct resource *io_region;
 	void __iomem *virt_base_addr;
+	struct task_struct *kthread;
 
 	dev_t devid;
 

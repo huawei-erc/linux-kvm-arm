@@ -52,7 +52,7 @@ static irqreturn_t handle_vcpu_irq(int irq, void *dev_id)
 static int __devinit vcpu_hotplug_device_probe(struct platform_device *pdev)
 {
 	struct vcpu_hotplug_dev *vcpu;
-	int ret;
+	int ret, cpu = smp_processor_id();
 
 	vcpu = devm_kzalloc(&pdev->dev, sizeof(struct vcpu_hotplug_dev),
 			    GFP_KERNEL);
@@ -106,19 +106,17 @@ static int __devinit vcpu_hotplug_device_probe(struct platform_device *pdev)
 	}
 
 	/* create and wake up kernel thread */
-	{
-		struct task_struct *p;
-		p = kthread_create_on_node(cpumask_thread, vcpu,
-					   cpu_to_node(0),
-					   "cpumask_thread/%d", 0);
-		if (IS_ERR(p)) {
-			dev_err(&pdev->dev, "cannot create cpumask kthread");
-			ret = PTR_ERR(p);
-			goto err;
-		}
-		kthread_bind(p, 0);
-		wake_up_process(p);
+	vcpu->kthread = kthread_create_on_node(cpumask_thread, vcpu,
+					       cpu_to_node(cpu),
+					       "cpumask_thread/%d", cpu);
+	if (IS_ERR(vcpu->kthread)) {
+		dev_err(&pdev->dev, "cannot create cpumask kthread");
+		ret = PTR_ERR(vcpu->kthread);
+		goto err;
 	}
+
+	kthread_bind(vcpu->kthread, cpu);
+	wake_up_process(vcpu->kthread);
 
 	return 0;
 
@@ -130,7 +128,12 @@ err:
 
 static int __devexit vcpu_hotplug_device_remove(struct platform_device *pdev)
 {
+	struct vcpu_hotplug_dev *vcpu = platform_get_drvdata(pdev);
+
 	platform_set_drvdata(pdev, NULL);
+
+	kthread_stop(vcpu->kthread);
+
 	return 0;
 }
 
