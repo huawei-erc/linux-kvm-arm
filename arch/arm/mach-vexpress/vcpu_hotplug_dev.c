@@ -59,7 +59,7 @@ __devinit static int vcpu_hotplug_device_probe(struct platform_device *pdev)
 	vcpu_hp.phy_base_addr = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 
 	if (!vcpu_hp.phy_base_addr) {
-		pr_err("could not get platform resource");
+		dev_err(&pdev->dev, "could not get platform resource");
 		return -EINVAL;
 	}
 
@@ -69,7 +69,7 @@ __devinit static int vcpu_hotplug_device_probe(struct platform_device *pdev)
 					resource_size(vcpu_hp.phy_base_addr),
 					"vcpu_hotplug_dev");
 	if (!vcpu_hp.io_region) {
-		pr_err("cannot register I/O memory");
+		dev_err(&pdev->dev, "cannot register I/O memory");
 		return -EBUSY;
 	}
 
@@ -77,24 +77,24 @@ __devinit static int vcpu_hotplug_device_probe(struct platform_device *pdev)
 	vcpu_hp.virt_base_addr = devm_ioremap(&pdev->dev, VCPU_HOTPLUG_DEV_BASE,
 					      PAGE_SIZE - 1);
 	if (!vcpu_hp.virt_base_addr) {
-		pr_err("ioremap failed");
+		dev_err(&pdev->dev, "ioremap failed");
 		return -EINVAL;
 	}
 
 	/* get vcpu hotplug device irq number and register irq handler */
 	vcpu_hp.irq = platform_get_irq(pdev, 0);
 	if (vcpu_hp.irq < 0) {
-		pr_err("failed to get platform IRQ");
+		dev_err(&pdev->dev, "failed to get platform IRQ");
 		return vcpu_hp.irq;
 	}
 
-	pr_notice("using irq %d", vcpu_hp.irq);
+	dev_notice(&pdev->dev, "using irq %d", vcpu_hp.irq);
 
 	/* registering non-shared irq line */
 	res = devm_request_irq(&pdev->dev, vcpu_hp.irq, handle_vcpu_irq, 0,
 			"vcpu_hotplug_dev", NULL);
 	if (res < 0) {
-		pr_err("cannot register IRQ %d", vcpu_hp.irq);
+		dev_err(&pdev->dev, "cannot register IRQ %d", vcpu_hp.irq);
 		return res;
 	}
 
@@ -105,7 +105,7 @@ __devinit static int vcpu_hotplug_device_probe(struct platform_device *pdev)
 					   cpu_to_node(0),
 					   "cpumask_thread/%d", 0);
 		if (IS_ERR(p)) {
-			pr_err("cannot create cpumask kthread");
+			dev_err(&pdev->dev, "cannot create cpumask kthread");
 			return PTR_ERR(p);
 		}
 		kthread_bind(p, 0);
