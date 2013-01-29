@@ -8,8 +8,6 @@
  * the Free Software Foundation, either version 2 of the License, or
  * (at your option) any later version.
  */
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -30,93 +28,115 @@
 #include "vcpu_hotplug_dev.h"
 #include "cpumask_thread.h"
 
-static struct vcpu_hotplug_dev vcpu_hp;
-
 /* platform device driver irq handler */
-static irqreturn_t handle_vcpu_irq(int irq, void *opaque)
+static irqreturn_t handle_vcpu_irq(int irq, void *dev_id)
 {
-	irqreturn_t ret = IRQ_NONE;
+	struct platform_device *pdev = dev_id;
+	struct vcpu_hotplug_dev *vcpu = platform_get_drvdata(pdev);
 	unsigned long ctrl;
+
 	/* read control byte */
-	ctrl = ioread8(vcpu_hp.virt_base_addr + VCPU_HP_HEADER_CTRL);
-	pr_alert("CTRL byte value is 0x%02lx", ctrl);
+	ctrl = ioread8(vcpu->virt_base_addr + VCPU_HP_HEADER_CTRL);
+	dev_alert(&pdev->dev, "CTRL byte value is 0x%02lx", ctrl);
 	/* clear IPR */
 	clear_bit(VCPU_HP_CTRL_IPR, &ctrl);
-	iowrite8(ctrl, vcpu_hp.virt_base_addr + VCPU_HP_HEADER_CTRL);
+	iowrite8(ctrl, vcpu->virt_base_addr + VCPU_HP_HEADER_CTRL);
 	/* start cpumask thread */
 	cpumask_flag = 1;
 	wake_up_interruptible(&cpumask_wq);
-	ret = IRQ_HANDLED;
-	return ret;
+
+	return IRQ_HANDLED;
 }
 
 /* platform device driver probe function */
 static int __devinit vcpu_hotplug_device_probe(struct platform_device *pdev)
 {
-	int res;
+	struct vcpu_hotplug_dev *vcpu;
+	int ret;
+
+	vcpu = devm_kzalloc(&pdev->dev, sizeof(struct vcpu_hotplug_dev),
+			    GFP_KERNEL);
+	if (!vcpu)
+		return -ENOMEM;
+
 	/* start setting up platform device operations */
 	/* get vcpu hotplug device base address */
-	vcpu_hp.phy_base_addr = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	vcpu->phy_base_addr = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 
-	if (!vcpu_hp.phy_base_addr) {
+	if (!vcpu->phy_base_addr) {
 		dev_err(&pdev->dev, "could not get platform resource");
 		return -EINVAL;
 	}
 
 	/* register io resource to kernel */
-	vcpu_hp.io_region = devm_request_mem_region(&pdev->dev,
-					vcpu_hp.phy_base_addr->start,
-					resource_size(vcpu_hp.phy_base_addr),
+	vcpu->io_region = devm_request_mem_region(&pdev->dev,
+					vcpu->phy_base_addr->start,
+					resource_size(vcpu->phy_base_addr),
 					"vcpu_hotplug_dev");
-	if (!vcpu_hp.io_region) {
+	if (!vcpu->io_region) {
 		dev_err(&pdev->dev, "cannot register I/O memory");
 		return -EBUSY;
 	}
 
 	/* XXX: size off by 1? */
-	vcpu_hp.virt_base_addr = devm_ioremap(&pdev->dev, VCPU_HOTPLUG_DEV_BASE,
-					      PAGE_SIZE - 1);
-	if (!vcpu_hp.virt_base_addr) {
+	vcpu->virt_base_addr = devm_ioremap(&pdev->dev, VCPU_HOTPLUG_DEV_BASE,
+					    PAGE_SIZE - 1);
+	if (!vcpu->virt_base_addr) {
 		dev_err(&pdev->dev, "ioremap failed");
 		return -EINVAL;
 	}
 
 	/* get vcpu hotplug device irq number and register irq handler */
-	vcpu_hp.irq = platform_get_irq(pdev, 0);
-	if (vcpu_hp.irq < 0) {
+	vcpu->irq = platform_get_irq(pdev, 0);
+	if (vcpu->irq < 0) {
 		dev_err(&pdev->dev, "failed to get platform IRQ");
-		return vcpu_hp.irq;
+		return vcpu->irq;
 	}
 
-	dev_notice(&pdev->dev, "using irq %d", vcpu_hp.irq);
+	dev_notice(&pdev->dev, "using irq %d", vcpu->irq);
+
+	platform_set_drvdata(pdev, vcpu);
 
 	/* registering non-shared irq line */
-	res = devm_request_irq(&pdev->dev, vcpu_hp.irq, handle_vcpu_irq, 0,
-			"vcpu_hotplug_dev", NULL);
-	if (res < 0) {
-		dev_err(&pdev->dev, "cannot register IRQ %d", vcpu_hp.irq);
-		return res;
+	ret = devm_request_irq(&pdev->dev, vcpu->irq, handle_vcpu_irq, 0,
+			"vcpu_hotplug_dev", pdev);
+	if (ret < 0) {
+		dev_err(&pdev->dev, "cannot register IRQ");
+		goto err;
 	}
 
 	/* create and wake up kernel thread */
 	{
 		struct task_struct *p;
-		p = kthread_create_on_node(cpumask_thread, &vcpu_hp,
+		p = kthread_create_on_node(cpumask_thread, vcpu,
 					   cpu_to_node(0),
 					   "cpumask_thread/%d", 0);
 		if (IS_ERR(p)) {
 			dev_err(&pdev->dev, "cannot create cpumask kthread");
-			return PTR_ERR(p);
+			ret = PTR_ERR(p);
+			goto err;
 		}
 		kthread_bind(p, 0);
 		wake_up_process(p);
 	}
 
 	return 0;
+
+err:
+	platform_set_drvdata(pdev, NULL);
+
+	return ret;
+}
+
+static int __devexit vcpu_hotplug_device_remove(struct platform_device *pdev)
+{
+	platform_set_drvdata(pdev, NULL);
+	return 0;
 }
 
 static struct platform_driver vcpu_hotplug_driver = {
 	.probe = vcpu_hotplug_device_probe,
+	.remove = __devexit_p(vcpu_hotplug_device_remove),
 	.driver = {
 		.name = "vcpu_hotplug_device",
 		.owner = THIS_MODULE,
