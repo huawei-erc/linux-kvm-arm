@@ -115,10 +115,9 @@ int cpumask_thread(void *data)
 {
 	struct vcpu_hotplug_dev *vcpu = data;
 
-	init_completion(&vcpu->complete);
-
 	while (!kthread_should_stop()) {
 		int ret;
+		init_completion(&vcpu->complete);
 
 		allow_signal(SIGKILL);
 

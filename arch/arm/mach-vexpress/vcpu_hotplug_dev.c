@@ -25,6 +25,8 @@
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <mach/hardware.h>
+#include <linux/of.h>
+#include <linux/of_address.h>
 #include "vcpu_hotplug_dev.h"
 #include "cpumask_thread.h"
 
@@ -51,9 +53,14 @@ static irqreturn_t handle_vcpu_irq(int irq, void *dev_id)
 /* platform device driver probe function */
 static int __devinit vcpu_hotplug_device_probe(struct platform_device *pdev)
 {
+	struct device_node *np = pdev->dev.of_node;
 	struct vcpu_hotplug_dev *vcpu;
 	int ret, cpu = smp_processor_id();
 
+	if(!np) { 
+		dev_err(&pdev->dev, "no device tree entry for vcpu hotplug dev\n");
+		return -EINVAL;
+	}
 	vcpu = devm_kzalloc(&pdev->dev, sizeof(struct vcpu_hotplug_dev),
 			    GFP_KERNEL);
 	if (!vcpu)
@@ -62,25 +69,22 @@ static int __devinit vcpu_hotplug_device_probe(struct platform_device *pdev)
 	/* start setting up platform device operations */
 	/* get vcpu hotplug device base address */
 	vcpu->phy_base_addr = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-
 	if (!vcpu->phy_base_addr) {
 		dev_err(&pdev->dev, "could not get platform resource");
 		return -EINVAL;
 	}
-
 	/* register io resource to kernel */
 	vcpu->io_region = devm_request_mem_region(&pdev->dev,
 					vcpu->phy_base_addr->start,
 					resource_size(vcpu->phy_base_addr),
-					"vcpu_hotplug_dev");
+					"vcpu_hotplug_dev"); 
 	if (!vcpu->io_region) {
 		dev_err(&pdev->dev, "cannot register I/O memory");
 		return -EBUSY;
 	}
 
-	/* XXX: size off by 1? */
 	vcpu->virt_base_addr = devm_ioremap(&pdev->dev, VCPU_HOTPLUG_DEV_BASE,
-					    PAGE_SIZE - 1);
+					    PAGE_SIZE);
 	if (!vcpu->virt_base_addr) {
 		dev_err(&pdev->dev, "ioremap failed");
 		return -EINVAL;
@@ -92,7 +96,6 @@ static int __devinit vcpu_hotplug_device_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "failed to get platform IRQ");
 		return vcpu->irq;
 	}
-
 	dev_notice(&pdev->dev, "using irq %d", vcpu->irq);
 
 	platform_set_drvdata(pdev, vcpu);
@@ -137,17 +140,26 @@ static int __devexit vcpu_hotplug_device_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static const struct of_device_id my_of_ids[] = {
+	{ .compatible = "arm,test-device" },
+	{ }
+};
+	
+MODULE_DEVICE_TABLE(of,my_of_ids);
+
 static struct platform_driver vcpu_hotplug_driver = {
 	.probe = vcpu_hotplug_device_probe,
 	.remove = __devexit_p(vcpu_hotplug_device_remove),
 	.driver = {
 		.name = "vcpu_hotplug_device",
+		.of_match_table = my_of_ids,
 		.owner = THIS_MODULE,
 	},
 };
 
 static int __init vcpu_hotplug_driver_init(void)
 {
+	printk(KERN_NOTICE "registering vcpu_hotplug_driver\n");
 	return platform_driver_register(&vcpu_hotplug_driver);
 }
 
