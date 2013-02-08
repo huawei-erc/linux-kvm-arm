@@ -80,6 +80,13 @@
 			     <1 10 0xf08>;
 	};
 
+	vcpu_hotplug_device@12000000 {
+			compatible = "arm,test-device";
+			reg = <0 0x12000000 0 0x1000>;
+			interrupts = <0 63 0xf04>;
+	};
+
+
 	dcc {
 		compatible = "arm,vexpress,config-bus";
 		arm,vexpress,config-bridge = <&v2m_sysreg>;
